@@ -1,0 +1,138 @@
+openapi: "3.0.0"
+info:
+  version: 1.0.0
+  title: sample api
+  description: sample api to create a customer entry and generate a bearer token
+
+# Enable request validator. See doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-validation-sample-api-swagger.html
+x-amazon-apigateway-request-validators:
+  all:
+    validateRequestBody: true
+    validateRequestParameters: true
+x-amazon-apigateway-request-validator: all
+
+x-amazon-apigateway-gateway-responses:
+  # Provide more detailed error message for bad request body errors. See doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-swagger-extensions-gateway-responses.html
+  BAD_REQUEST_BODY:
+    responseTemplates:
+      application/json: '{"Code": "400", "Message": "$context.error.validationErrorString"}'
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+  DEFAULT_4XX:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+  DEFAULT_5XX:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+
+paths:
+  /scim/access/oauthbearertoken:
+    put:
+      summary: Creates an OAuth Bearer Token
+      description: |
+        Creates an OAuth Bearer Token
+      tags:
+        - credential
+      operationId: createBearerToken
+      responses:
+        "201":
+          description: Successful Onboarding Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingResponse"
+        '401':
+          description: Unauthorised.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error Creating Credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${APILambda.Arn}:live/invocations
+        httpMethod: POST
+        type: aws_proxy
+        passthroughBehavior: never
+      security:
+        - sigv4: []
+
+components:
+  securitySchemes:
+    sigv4:
+      type: apiKey
+      name: Authorization
+      in: header
+      x-amazon-apigateway-authtype: awsSigv4
+  schemas:
+    OnboardingResponse:
+      required:
+        - OAuthBearer
+        - ScimURL
+      properties:
+        OAuthBearer:
+          $ref: "#/components/schemas/OAuthBearer"
+        ScimURL:
+          type: string
+          description: "Custom API URL for this token"
+          example: "https://hostname/20220303/scim/v2/organisations/f79cae3a-eb76-4f89-89aa-71b5367805c4"
+
+    OAuthBearer:
+      required:
+        - CustomerID
+        - OrganisationID
+        - BearerToken
+        - CreatedBy
+        - CreatedTS
+      properties:
+        CustomerID:
+          type: string
+          description: "UUID"
+          pattern: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        OrganisationID:
+          type: string
+          description: "UUID"
+          pattern: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        BearerToken:
+          type: string
+          description: "Token"
+          example: "sample_bt_fvWIcV5iYNWR83x2aUueyhvKLcA4ciH8klC4nkWpDENU1nY"
+        CreatedBy:
+          type: string
+          description: "UUID"
+          pattern: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        CreatedTS:
+          type: string
+          format: "date-time"
+          description: Created timestamp of the API token
+
+    ErrorResponse:
+      required:
+        - Error
+      properties:
+        Error:
+          $ref: "#/components/schemas/Error"
+
+    Error:
+      required:
+        - Code
+        - Message
+      properties:
+        Code:
+          type: integer
+          format: int32
+          description: Error code
+        Message:
+          type: string
+          description: Error message
