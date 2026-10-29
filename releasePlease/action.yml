@@ -2,11 +2,14 @@ name: release-please-go
 description: Go port of the core of googleapis/release-please
 inputs:
   token:
-    description: GitHub token with contents and pull-requests write access
+    description: GitHub token. The workflow's built-in GITHUB_TOKEN works; see README for the permissions it needs.
     default: ${{ github.token }}
   command:
     description: release-pr, github-release or all
     default: all
+  release-type:
+    description: auto, simple, go or java-gradle
+    default: auto
   args:
     description: Extra flags, e.g. "--extra-files=version.go --bump-minor-pre-major"
     default: ""
@@ -32,12 +35,23 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v5
+    # GitHub-hosted runners ship with Go, so only install it when missing.
+    # This avoids changing the Go version a Go repo's own workflow set up.
+    - id: go
+      shell: bash
+      run: echo "missing=$(command -v go >/dev/null && echo false || echo true)" >> "$GITHUB_OUTPUT"
+    - if: steps.go.outputs.missing == 'true'
+      uses: actions/setup-go@v5
       with:
         go-version: "1.24"
+        cache: false
     - id: run
       shell: bash
       working-directory: ${{ github.action_path }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: go run . ${{ inputs.args }} ${{ inputs.command }}
+        # Isolate the build from the calling repository's Go settings.
+        GOFLAGS: ""
+        GOWORK: "off"
+        GOTOOLCHAIN: auto
+      run: go run . --release-type '${{ inputs.release-type }}' ${{ inputs.args }} ${{ inputs.command }}

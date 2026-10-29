@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,11 +34,12 @@ func run(args []string) error {
 		repo       = fs.String("repo", os.Getenv("GITHUB_REPOSITORY"), "owner/name (default $GITHUB_REPOSITORY)")
 		apiURL     = fs.String("api-url", envOr("GITHUB_API_URL", "https://api.github.com"), "GitHub API URL")
 		webURL     = fs.String("server-url", envOr("GITHUB_SERVER_URL", "https://github.com"), "GitHub web URL, used for changelog links")
+		relType    = fs.String("release-type", "auto", "auto, "+strings.Join(release.ReleaseTypes, ", "))
 		branch     = fs.String("branch", "", "target branch (default: the repository's default branch)")
 		tagPrefix  = fs.String("tag-prefix", "v", "prefix for release tags")
 		initial    = fs.String("initial-version", "1.0.0", "version to use when there is no previous release")
 		changelog  = fs.String("changelog-path", "CHANGELOG.md", "changelog file; empty to disable")
-		versionTxt = fs.String("version-file", "version.txt", "plain-text version file; empty to disable")
+		versionTxt = fs.String("version-file", "", "plain-text version file (default version.txt for the simple type)")
 		extra      = fs.String("extra-files", "", "comma-separated files containing x-release-please-version annotations")
 		minorPre   = fs.Bool("bump-minor-pre-major", false, "breaking changes bump minor, not major, before 1.0.0")
 		patchPre   = fs.Bool("bump-patch-for-minor-pre-major", false, "features bump patch, not minor, before 1.0.0")
@@ -81,10 +83,14 @@ func run(args []string) error {
 		}
 	}
 
+	versionFileSet := false
+	fs.Visit(func(f *flag.Flag) { versionFileSet = versionFileSet || f.Name == "version-file" })
+
 	r := &release.Runner{
 		GH:  gh,
 		Log: os.Stderr,
 		Cfg: release.Config{
+			ReleaseType:               *relType,
 			Branch:                    *branch,
 			TagPrefix:                 *tagPrefix,
 			InitialVersion:            *initial,
@@ -96,6 +102,20 @@ func run(args []string) error {
 			WebURL:                    *webURL,
 			DryRun:                    *dryRun,
 		},
+	}
+
+	if r.Cfg.ReleaseType == "auto" {
+		t, err := r.DetectReleaseType(ctx)
+		if err != nil {
+			return fmt.Errorf("detecting release type: %w", err)
+		}
+		r.Cfg.ReleaseType = t
+		fmt.Fprintf(os.Stderr, "detected release type: %s\n", t)
+	} else if !slices.Contains(release.ReleaseTypes, r.Cfg.ReleaseType) {
+		return fmt.Errorf("unknown --release-type %q", r.Cfg.ReleaseType)
+	}
+	if r.Cfg.ReleaseType == release.TypeSimple && !versionFileSet {
+		r.Cfg.VersionFile = "version.txt"
 	}
 
 	out := map[string]string{}

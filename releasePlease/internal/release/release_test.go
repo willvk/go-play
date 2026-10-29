@@ -352,3 +352,84 @@ func TestNotesFromBody(t *testing.T) {
 		t.Errorf("notesFromBody = %q", got)
 	}
 }
+
+func newRunner(t *testing.T, f *fakeGitHub, cfg Config) *Runner {
+	srv := httptest.NewServer(f.handler(t))
+	t.Cleanup(srv.Close)
+	cfg.Branch, cfg.TagPrefix, cfg.ChangelogPath = "main", "v", "CHANGELOG.md"
+	return &Runner{
+		GH:  &github.Client{BaseURL: srv.URL, Owner: "o", Repo: "r", HTTP: srv.Client()},
+		Cfg: cfg,
+		Now: func() time.Time { return time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC) },
+	}
+}
+
+func TestGradleReleasePR(t *testing.T) {
+	f := newFake()
+	f.commit("c0", "chore: init")
+	f.tags["v0.3.0"] = "c0"
+	f.releases = []github.Release{{TagName: "v0.3.0"}}
+	f.commit("c1", "feat: new endpoint")
+	f.files["build.gradle.kts"] = "plugins { java }\n\nversion = \"0.3.1-SNAPSHOT\"\n"
+	f.files["gradle.properties"] = "org.gradle.jvmargs=-Xmx2g\nversion=0.3.1-SNAPSHOT\n"
+	f.files["settings.gradle.kts"] = "rootProject.name = \"app\"\n"
+
+	r := newRunner(t, f, Config{})
+	typ, err := r.DetectReleaseType(context.Background())
+	if err != nil || typ != TypeGradle {
+		t.Fatalf("DetectReleaseType = %q, %v", typ, err)
+	}
+	r.Cfg.ReleaseType = typ
+	if _, err := r.ReleasePR(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tree := f.trees["newtree"]
+	if tree["build.gradle.kts"] != "plugins { java }\n\nversion = \"0.4.0\"\n" {
+		t.Errorf("build.gradle.kts = %q", tree["build.gradle.kts"])
+	}
+	if tree["gradle.properties"] != "org.gradle.jvmargs=-Xmx2g\nversion=0.4.0\n" {
+		t.Errorf("gradle.properties = %q", tree["gradle.properties"])
+	}
+	if _, ok := tree["version.txt"]; ok {
+		t.Error("gradle release should not write version.txt")
+	}
+}
+
+func TestGoReleasePR(t *testing.T) {
+	f := newFake()
+	f.commit("c0", "chore: init")
+	f.tags["v1.4.0"] = "c0"
+	f.releases = []github.Release{{TagName: "v1.4.0"}}
+	f.commit("c1", "feat!: rename API")
+	f.files["go.mod"] = "module github.com/o/r\n\ngo 1.24\n"
+
+	r := newRunner(t, f, Config{})
+	typ, err := r.DetectReleaseType(context.Background())
+	if err != nil || typ != TypeGo {
+		t.Fatalf("DetectReleaseType = %q, %v", typ, err)
+	}
+	r.Cfg.ReleaseType = typ
+	res, err := r.ReleasePR(context.Background())
+	if err != nil || res.Version != "2.0.0" {
+		t.Fatalf("got %+v, %v", res, err)
+	}
+	if keys := sortedKeys(f.trees["newtree"]); len(keys) != 1 || keys[0] != "CHANGELOG.md" {
+		t.Errorf("go release should only touch CHANGELOG.md, got %v", keys)
+	}
+	body := f.pulls[0].Body
+	if !strings.Contains(body, "github.com/o/r/v2") {
+		t.Errorf("expected /v2 module warning in PR body:\n%s", body)
+	}
+	if notes := notesFromBody(body); strings.Contains(notes, "WARNING") || !strings.Contains(notes, "BREAKING") {
+		t.Errorf("release notes should exclude the warning: %q", notes)
+	}
+
+	// With the /v2 path in place there is no warning.
+	f.files["go.mod"] = "module github.com/o/r/v2\n\ngo 1.24\n"
+	if _, err := r.ReleasePR(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.pulls[0].Body, "WARNING") {
+		t.Error("unexpected warning with /v2 module path")
+	}
+}
