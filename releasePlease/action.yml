@@ -1,0 +1,43 @@
+name: release-please-go
+description: Go port of the core of googleapis/release-please
+inputs:
+  token:
+    description: GitHub token with contents and pull-requests write access
+    default: ${{ github.token }}
+  command:
+    description: release-pr, github-release or all
+    default: all
+  args:
+    description: Extra flags, e.g. "--extra-files=version.go --bump-minor-pre-major"
+    default: ""
+outputs:
+  release_created:
+    description: "true if a release was created"
+    value: ${{ steps.run.outputs.release_created }}
+  tag_name:
+    description: Tag of the created release
+    value: ${{ steps.run.outputs.tag_name }}
+  version:
+    description: Version of the created release
+    value: ${{ steps.run.outputs.version }}
+  html_url:
+    description: URL of the created release
+    value: ${{ steps.run.outputs.html_url }}
+  pr:
+    description: Number of the release PR
+    value: ${{ steps.run.outputs.pr }}
+  pr_url:
+    description: URL of the release PR
+    value: ${{ steps.run.outputs.pr_url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.24"
+    - id: run
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: go run . ${{ inputs.args }} ${{ inputs.command }}

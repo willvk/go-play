@@ -1,0 +1,11 @@
+release-please-go
+
+This is a partial port to Go of Release Please
+(https://github.com/googleapis/release-please), Copyright Google LLC,
+licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0).
+
+The code was rewritten from scratch in Go rather than translated line by
+line. Release-PR naming, labels, changelog layout, default changelog sections,
+versioning rules and the x-release-please-version annotations follow the
+behaviour of the original project.
